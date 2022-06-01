@@ -1,90 +1,152 @@
 
-With this package, you can clean correlation matrices of data sets in the context of high dimensionality using the **RIE Estimator** <img src="https://render.githubusercontent.com/render/math?math=\color{red}\Xi_{RIE}"> (Rotationally Invariant Estimator, a.k.a oracle estimator) developed by Bouchaud and Knowles in 2016 that can be found [here.](https://www.researchgate.net/publication/323255675_An_Optimal_Rotational_Invariant_Estimator_for_General_Covariance_Matrices_the_outliers)
+# Sistema Remote SFTP
+El proyecto nos permite poder hacer conexión a cualquier host que nos admita conectarnos por SSH, para después por medio del protocolo SFTP podamos indagar en algún fichero cliente y nos permita traernos archivos en base al REGEX que nosotros le establezcamos y validemos conforme a dos parámetros: que sea un archivo nuevo o un archivo ya existente, pero con mayor última fecha de modificación. Cabe aclarar que no es necesario que pase por dicha validación y simplemente extraerlo no importando la metadata, el nombre de estos archivos y su última fecha de modificación se guardan en la base de datos como: “archivos procesados”. Una vez teniendo los archivos de alguna de las formas mencionadas anteriormente pasa por un proceso de archivo programable el cual nos permitirá programarle ciertos aspectos que nosotros queramos. Ya teniendo esto, pasa por una construcción de nombre único que nos permitirá saber cuándo fue elaborado, su fecha máxima y mínima de algún campo que tenga fecha, nombre de archivo y tipo de archivo. Este tipo de archivo se guarda en la base de datos como: “archivos generados”.
 
-Broadly speaking, the estimator is defined as:
+## Requisitos:
 
-<p align = "center">
-<img  src="https://render.githubusercontent.com/render/math?math=\LARGE\color{red}\Xi_{RIE}%20=%20\sum_{k=1}^{N}%20\xi_k^{RIE}%20u_k%20u_k^T">
-</p>
+<h3> Instalación</h3>
 
+<p>•	Tener instalado Python 3.8.8.</p>
+<p> •	Tener configurado en la maquina cliente y en el servidor el SSH.</p>
+<p> •	Para Windows: https://www.softzone.es/windows/como-se-hace/activar-usar-ssh-windows-10/</p>
+<p> •	Para Linux: https://www2.microstrategy.com/producthelp/Current/InstallConfig/es-es/Content/topology_config_SSH_linux.htm#:~:text=Para%20configurar%20SSH%20en%20Linux,comandos%20con%20permisos%20de%20superusuario.&text=Si%20tiene%20un%20firewall%2C%20abra,yaml%2Fy%20abra%20el%20installation_list.</p>
 
-The algorithm to standardize the data matrix and to calculate this estimator is followed exactly as proposed by this authors, and this implementation try to use vectorized operations when possible to improve the speed of the calculations.
-
-In general, this estimator is used mainly in finance to obtain the correlation between assets, and it has been shown that this estimator is more precise when working with matrices in which N is approximate of the same order than T (that is, that the number of columns is of the same order that the number of rows) compared to the sample correlation matrix estimator, which is defined as below (X is the data matrix):
-
-<p align = "center">
-<img  src="https://render.githubusercontent.com/render/math?math=\LARGE\color{red}\E=\frac{1}{T}XX^T">
-</p>
-
-
-The package takes as the input a **pandas dataframe** with no empty values and containing only numeric features and returns a **numpy matrix** with the cleansed correlation matrix (i.e. the RIE estimator).
-
-
-## Installation
-
-You can install the package with `pip`:
+<p>•	Instalar con pip lo siguente:</p>
 
 ```sh
-pip install rie_estimator
+pip install keyring==23.5.0
+```
+```sh
+pip install pandas==0.25.1
+```
+```sh
+pip install paramiko==2.9.2
+```
+```sh
+pip install PyYAML==6.0
+```
+```sh
+pip install yml == 0.0.1
 ```
 
-*Dependencies.*
-
-There are only two dependencies so far: *pandas* and *numpy*.
+<h3>Creación de archivo Pipeline_funs.</h3>
 
 
-## Example of use
-
-The input has to be a pandas dataframe containing the raw data with N columns and T rows (in Finance, this would be a matrix containing T returns of N assets), for example:
-
-
-|  |BTC-USD |GC=F |GOOGL | ^MXX|
-| ---| ---| ---| ---| ---|
-|2021-01-05| 0.063197  |0.004114 | 0.004784  |0.004589|
-|2021-01-06 | 0.083311 |-0.023455 |-0.002018 | 0.015121|
-|2021-01-07 | 0.069157 | 0.002832 |-0.012382 | 0.013195|
-|2021-01-08 | 0.036234 |-0.040893 | 0.017518 | 0.011705|
-
-We can calculate the cleansed correlation matrix between this 4 assets as follows:
+El archivo de ejemplo pipe_funs.py.
 
 
 ```python
-# importing the library
-import rie_estimator
+import pandas as pd
+import csv
+from FSlog import FSlog
 
-# load your data matrix
-data = pd.read_csv('./my dataframe')
+def filesDetectionRegex(flags, mylog):
+    ''' Must return a string with the appropiate "regex" ready for glob'''
+    regex = "[csv]" 
+    mylog("Fetching regex: ", regex)
+    res_dct = dict()
+    return regex, res_dct
 
-#Calculate the RIE estimator
-# If you don't want your data matrix to be standardize,
-# then set normalize = False
-cleansed_rie = rie_estimator.get_rie(data, normalize = True)
+def loadFunction(filename, params, mylog):
+    ''' Must return (a dataframe with the loaded data and the dictionary of params for transformFunction) or None 
+    '''
+    tbl = pd.read_csv(filename, dtype = str, parse_dates = ['TransactionDate'])
+    res_dct = {'filename': str(filename.name)}
+    return tbl, res_dct
 
-#Take a look at your cleansed RIE!
-print(cleansed_rie)
-
-#Output
-[[ 1.10561502 -0.0221884   0.00143368  0.07711   ]
- [-0.0221884   1.10813374 -0.07954577 -0.00211591]
- [ 0.00143368 -0.07954577  1.10425599 -0.01714854]
- [ 0.07711    -0.00211591 -0.01714854  1.10154842]]
+def transformFunction(tbl : pd.DataFrame, params : dict, mylog : FSlog) -> tuple(pd.DataFrame, dict):
+    ''' 
+    Must return the transformed table and the parameters dict containing
+    min_date, max_datem, the filename to be used
+    '''
+    res_dct = { 'min_date': tbl['TransactionDate'].min(),
+                'max_date': tbl['TransactionDate'].max(),
+                'filename': params['filename'],
+                'to_csv_params': {'quoting':csv.QUOTE_ALL}}
+    return tbl, res_dct # res_dct must contain min_date, max_date and filename
 
 
 ```
 
-## Results
+<h3> Se compone de tres métodos:</h3>
+<h4>1.	filesDetectionRegex:</h4>
+Este método se encarga de filtrar la información en base al REGEX que establezcamos. También, puede contemplar una bandera, esa en particular, se manda por medio de la ejecución del código en la línea de comandos.
+<h4>2.	loadFunction:</h4>
+Se encarga de retornar el dataframe y el tipo de archivo a leer. Este método tiene que recibir la ruta y el nombre del archivo que se guarda en la carpta temporal “proxy_dir”.
 
-Just to show the advantages of using the RIE estimator against the sample correlation matrix, below it is shown the difference between the in-sample risk and out-of-sample risk of the optimal frontier when using the RIE with the Markowitz portfolio theory with assets from the S&P500. It is known that the true risk of the portfolio lies between the calculated in-sample and out-of-sample risk, and therefore a smaller gap between these two indicates a more precise estimation of the true risk, which is the result of using a more precise estimator.
+<h4>3.	transformFunction:</h4>
+Es el método en donde se va a poder programar lo que queramos hacerle al archivo. Además tenemos que retornar un diccionario con la fecha mínima y máxima, así como, nombre del archivo esto para poder crear el nuevo nombre del archivo generado.
 
- It can be seen that the gap between both risks is reduced when using the RIE estimator, in contrast to the sample covariance matrix.
 
-<p align="center" width="100%">
-  <img src="https://i.ibb.co/C1nnR4d/RIEvs-E-ing.png" height="500">
-</p>
+## Ejecución del código.
 
-## To-do
+<p>Para poderlo ejecutar en la línea de comandos, tenemos que ubicarnos en donde esta tu archivo RemoteSFTP.py y correrlo de la siguiente forma:</p>
+<p>..\..\RemoteSFTP.py test1.yml -fetchnew, siendo:</p>
+<p>Amarillo: ruta del archivo donde esta toda la lógica del programa.</p>
+<p>Verde: ruta del archivo de configuración.</p>
+<p>Café: parámetro que se manda desde la línea de comandos para que le indique a la clase RemoteSFTP que ejecute el método fetnew que se encarga del proceso del sftp.</p>
 
-I hope to be able to eventually implement a couple of things:
-- Alternative forms of standardizing the data matrix, as suggested by Bouchaud and Potters.
-- Accepting other objects as inputs (such as numpy matrices).
-- Implementing new research related to enhancing the precission of this estimator.
+<h4>Parametro extra: </h4>
+
+Hablando de la ruta anterior ..\..\RemoteSFTP.py test1.yml -fetchnew podemos mandar un parámetro extra que es la bandera, esta se encarga de especificarle al filesDetectionRegex si quiere ocupar un REGEX en base a una bandera.
+
+<p>Hablando de la ruta anterior ..\..\RemoteSFTP.py test1.yml -fetchnew podemos mandar un parámetro extra que es la bandera, esta se encarga de especificarle al filesDetectionRegex si quiere ocupar un REGEX en base a una bandera.</p>
+
+<p>Ejemplo de url: ..\..\RemoteSFTP.py test1.yml -fetchnew -daily</p>
+
+<p>En donde en el proceso de filesDetectionRegex sería algo similar a esto:</p>
+
+```python
+import pandas as pd
+import csv
+from FSlog import FSlog
+import numpy as np
+from decimal import Decimal
+def filesDetectionRegex(flags, mylog):
+    ''' Must return a string with the appropiate "regex" ready for glob'''
+    if flags[0] == "-monthly":
+        regex = "data_monthly" 
+        mylog("Fetching regex: ", regex)
+        res_dct = dict()
+    else:
+        if flags[0] == "-daily":
+            regex = "data_day" 
+            mylog("Fetching regex: ", regex)
+            res_dct = dict()
+        else:
+            mylog
+    return regex, res_dct
+
+def loadFunction(filename, params, mylog):
+    ''' Must return (a dataframe with the loaded data and the dictionary of params for transformFunction) or None 
+    '''
+    tbl = pd.read_csv(filename, dtype = str, sep='#')
+    tbl['DATE1'] = pd.to_datetime(tbl['DATE'], format="%Y\\%m\\%d")
+    tbl['DATE'] = tbl['DATE1'].dt.strftime("%Y-%d-%m")
+    res_dct = {'filename': str(filename.name)}
+    return tbl, res_dct
+
+def dec(num):
+    return Decimal(num)
+
+def transformFunction(tbl : pd.DataFrame, params : dict, mylog : FSlog) -> (pd.DataFrame, dict):
+    ''' 
+    Must return the transformed table and the parameters dict containing
+    min_date, max_datem, the filename to be used
+    '''
+    dec_vec = np.vectorize(dec)
+    tbl['SALE'] = tbl['SALE'].map(dec_vec)
+    tbl['AMOUNT'] = tbl['AMOUNT'].map(dec_vec)
+    a_gpd = tbl.groupby(['BANK','FORMAT','DATE','DATE1'])
+    tbl = a_gpd.sum().reset_index()[['DATE','SALE','AMOUNT','FORMAT','BANK','DATE1']]
+
+    res_dct = { 'min_date': tbl['DATE1'].min(),
+                'max_date': tbl['DATE1'].max(),
+                'filename': params['filename'],
+                'to_csv_params': {}}
+    tbl = a_gpd.sum().reset_index()[['DATE','SALE','AMOUNT','FORMAT','BANK']]
+    return tbl, res_dct # res_dct must contain min_date, max_date and filename
+
+
+
+```
